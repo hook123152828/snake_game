@@ -1,0 +1,169 @@
+import SwiftUI
+import Observation
+
+extension CGPoint: Hashable {
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(x)
+        hasher.combine(y)
+    }
+    public static func == (lhs: CGPoint, rhs: CGPoint) -> Bool {
+        return lhs.x == rhs.x && lhs.y == rhs.y
+    }
+}
+
+@Observable
+class SnakeGameState {
+    var snake: [CGPoint] = [CGPoint(x: 5, y: 5)]
+    var direction: Direction = .right
+    var foodPosition: CGPoint = CGPoint(x: 10, y: 10)
+    var score: Int = 0
+    var isGameOver: Bool = false
+    var timeLeft: Int = 10
+    var gridSize: Int = 20
+
+    enum Direction {
+        case up, down, left, right
+    }
+
+    func moveSnake() {
+        guard !isGameOver else { return }
+        var newHead = snake.first!
+        switch direction {
+        case .up: newHead.y -= 1
+        case .down: newHead.y += 1
+        case .left: newHead.x -= 1
+        case .right: newHead.x += 1
+        }
+        if newHead.x < 0 || newHead.y < 0 || newHead.x >= CGFloat(gridSize) || newHead.y >= CGFloat(gridSize) || snake.contains(newHead) {
+            isGameOver = true
+            return
+        }
+        if newHead == foodPosition {
+            score += 1
+            foodPosition = generateFoodPosition()
+            timeLeft = 10
+        } else {
+            snake.removeLast()
+        }
+        snake.insert(newHead, at: 0)
+    }
+
+    func generateFoodPosition() -> CGPoint {
+        var newPosition: CGPoint
+        repeat {
+            newPosition = CGPoint(x: CGFloat(Int.random(in: 0..<gridSize)), y: CGFloat(Int.random(in: 0..<gridSize)))
+        } while snake.contains(newPosition)
+        return newPosition
+    }
+
+    func resetGame() {
+        snake = [CGPoint(x: 5, y: 5)]
+        direction = .right
+        foodPosition = CGPoint(x: 10, y: 10)
+        score = 0
+        isGameOver = false
+        timeLeft = 10
+    }
+}
+
+struct SnakeGameView: View {
+    @Environment(SnakeGameState.self) var gameState
+    @AppStorage("highScore") private var highScore: Int = 0
+    @State private var moveTimer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
+    @State private var countdownTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        ZStack {
+            Color.black.edgesIgnoringSafeArea(.all)
+            VStack {
+                Text("Score: \(gameState.score)")
+                    .font(.title)
+                    .foregroundColor(.white)
+                Text("High Score: \(highScore)")
+                    .font(.headline)
+                    .foregroundColor(.yellow)
+                Text("Time Left: \(gameState.timeLeft)")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                Spacer()
+                GeometryReader { geometry in
+                    let cellSize = geometry.size.width / CGFloat(gameState.gridSize)
+                    ZStack {
+                        ForEach(gameState.snake, id: \.self) { segment in
+                            Rectangle()
+                                .fill(Color.green)
+                                .frame(width: cellSize, height: cellSize)
+                                .position(x: segment.x * cellSize + cellSize / 2, y: segment.y * cellSize + cellSize / 2)
+                        }
+                        Rectangle()
+                            .fill(Color.red)
+                            .frame(width: cellSize, height: cellSize)
+                            .position(x: gameState.foodPosition.x * cellSize + cellSize / 2, y: gameState.foodPosition.y * cellSize + cellSize / 2)
+                    }
+                }
+                .aspectRatio(1, contentMode: .fit)
+                .background(Color.gray)
+                .cornerRadius(10)
+                Spacer()
+                if gameState.isGameOver {
+                    Button("Replay") {
+                        if gameState.score > highScore {
+                            highScore = gameState.score
+                        }
+                        gameState.resetGame()
+                    }
+                    .font(.title)
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+                }
+            }
+        }
+        .onAppear {
+            gameState.resetGame()
+        }
+        .onReceive(moveTimer) { _ in
+            if !gameState.isGameOver {
+                gameState.moveSnake()
+            }
+        }
+        .onReceive(countdownTimer) { _ in
+            if !gameState.isGameOver && gameState.timeLeft > 0 {
+                gameState.timeLeft -= 1
+            } else if gameState.timeLeft <= 0 {
+                gameState.isGameOver = true
+            }
+        }
+        .gesture(
+            DragGesture()
+                .onEnded { gesture in
+                    let horizontalAmount = gesture.translation.width
+                    let verticalAmount = gesture.translation.height
+                    if abs(horizontalAmount) > abs(verticalAmount) {
+                        if horizontalAmount > 0 && gameState.direction != .left {
+                            gameState.direction = .right
+                        } else if horizontalAmount < 0 && gameState.direction != .right {
+                            gameState.direction = .left
+                        }
+                    } else {
+                        if verticalAmount > 0 && gameState.direction != .up {
+                            gameState.direction = .down
+                        } else if verticalAmount < 0 && gameState.direction != .down {
+                            gameState.direction = .up
+                        }
+                    }
+                }
+        )
+    }
+}
+
+@main
+struct SnakeGameApp: App {
+    var body: some Scene {
+        WindowGroup {
+            SnakeGameView()
+                .environment(SnakeGameState())
+        }
+    }
+}
